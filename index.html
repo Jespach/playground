@@ -3,10 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Historic Rainfall Explorer</title>
     <meta
       name="description"
-      content="Browse a map, select a location, and pull historic rainfall data from Open-Meteo."
+      content="Pick a location on a map and explore historic rainfall from Open-Meteo."
     />
     <link
       rel="stylesheet"
@@ -24,21 +25,27 @@
           <h1>Historic Rainfall Explorer</h1>
         </div>
 
-        <div class="control-group">
+        <form id="searchForm" class="control-group" role="search">
           <label for="locationSearch">Search for a place</label>
           <div class="search-row">
             <input
               id="locationSearch"
-              type="text"
+              type="search"
               placeholder="Try London, Tokyo, Cape Town..."
+              autocomplete="off"
             />
-            <button id="searchBtn" type="button">Search</button>
+            <button id="searchBtn" type="submit">Search</button>
           </div>
+        </form>
+
+        <div class="control-group">
+          <span id="savedPlacesLabel" class="field-label">Saved places</span>
+          <div id="savedPlaces" class="saved-places" role="group" aria-labelledby="savedPlacesLabel"></div>
         </div>
 
         <div class="control-group">
-          <label>Selected location</label>
-          <div id="selectionInfo" class="selection-info">
+          <span id="selectionLabel" class="field-label">Selected location</span>
+          <div id="selectionInfo" class="selection-info" aria-labelledby="selectionLabel" aria-live="polite">
             Click on the map or search for a place.
           </div>
         </div>
@@ -56,9 +63,32 @@
 
         <div class="button-row">
           <button id="loadBtn" class="primary" type="button">Load rainfall</button>
-          <button id="mapCenterBtn" type="button" class="secondary">
-            Use map center
-          </button>
+          <button id="mapCenterBtn" type="button" class="secondary">Use map center</button>
+        </div>
+
+        <p id="status" class="status" role="status" aria-live="polite" hidden></p>
+
+        <div class="control-group">
+          <label for="groupBySelect">Group by</label>
+          <select id="groupBySelect">
+            <option value="day">Day</option>
+            <option value="week">Week</option>
+            <option value="month">Month</option>
+            <option value="quarter">Quarter</option>
+            <option value="year">Year</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="chartViewSelect">Chart view</label>
+          <select id="chartViewSelect">
+            <option value="all">All charts</option>
+            <option value="daily">Rainfall</option>
+            <option value="cumulative">Cumulative rainfall</option>
+            <option value="rolling">Rolling 7-day total</option>
+            <option value="comparison">Rainfall vs temperature</option>
+            <option value="heatmap">Seasonal heatmap</option>
+          </select>
         </div>
 
         <div class="summary-grid">
@@ -70,34 +100,88 @@
             <span class="label">Average / day</span>
             <strong id="avgRainfall">--</strong>
           </div>
+          <div class="summary-card">
+            <span class="label">Rain days (&ge;1 mm)</span>
+            <strong id="rainDays">--</strong>
+          </div>
+          <div class="summary-card">
+            <span class="label">Days with data</span>
+            <strong id="dataCoverage">--</strong>
+          </div>
           <div class="summary-card wide">
             <span class="label">Wettest day</span>
             <strong id="wettestDay">--</strong>
           </div>
         </div>
+
+        <p class="credits">
+          Weather data: <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> (ERA5 reanalysis, 1940 onwards).
+          Place search: <a href="https://nominatim.org/" target="_blank" rel="noopener">Nominatim</a> /
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>.
+        </p>
       </aside>
 
-      <main class="content-panel">
-        <div id="map" aria-label="Rainfall map" role="application"></div>
+      <main id="contentPanel" class="content-panel" aria-busy="false">
+        <div id="map" aria-label="Map. Click to choose a location." role="application"></div>
 
-        <section class="chart-panel">
+        <section id="dailyChartPanel" class="chart-panel">
           <div class="section-header">
-            <h2>Rainfall trend</h2>
+            <h2 id="mainChartTitle">Daily rainfall</h2>
           </div>
-          <canvas id="rainChart"></canvas>
+          <div class="chart-box chart-box--main">
+            <canvas id="rainChart"></canvas>
+          </div>
+        </section>
+
+        <section class="chart-grid" id="chartGrid">
+          <div id="cumulativePanel" class="mini-chart-panel">
+            <div class="section-header">
+              <h3>Cumulative rainfall</h3>
+            </div>
+            <div class="chart-box">
+              <canvas id="cumulativeChart"></canvas>
+            </div>
+          </div>
+
+          <div id="rollingPanel" class="mini-chart-panel">
+            <div class="section-header">
+              <h3>Rolling 7-day total</h3>
+            </div>
+            <div class="chart-box">
+              <canvas id="rollingChart"></canvas>
+            </div>
+          </div>
+
+          <div id="comparisonPanel" class="mini-chart-panel full-span">
+            <div class="section-header">
+              <h3 id="comparisonTitle">Daily rainfall vs temperature</h3>
+            </div>
+            <div class="chart-box">
+              <canvas id="comparisonChart"></canvas>
+              <p id="comparisonEmpty" class="empty-note" hidden>
+                Open-Meteo returned no temperature values for the selected range.
+              </p>
+            </div>
+          </div>
+
+          <div id="heatmapPanel" class="mini-chart-panel full-span">
+            <div class="section-header">
+              <h3>Seasonal rainfall heatmap</h3>
+              <span id="heatmapLegend" class="section-note"></span>
+            </div>
+            <div id="rainHeatmap" class="rain-heatmap"></div>
+          </div>
         </section>
 
         <section class="table-panel">
           <div class="section-header">
-            <h2>Daily rainfall</h2>
+            <h2 id="tableTitle">Daily rainfall</h2>
+            <button id="downloadBtn" type="button" class="secondary small" disabled>Download CSV</button>
           </div>
           <div class="table-wrap">
             <table>
               <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Rainfall</th>
-                </tr>
+                <tr id="rainTableHead"></tr>
               </thead>
               <tbody id="rainTableBody"></tbody>
             </table>
@@ -111,7 +195,11 @@
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin=""
     ></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"
+      integrity="sha384-dug+JxfBvklEQdJ4AYuBBAIScUz0bVN73xpy273gcAwHjb3qI0fXmuYNaNfdyYJG"
+      crossorigin="anonymous"
+    ></script>
     <script src="script.js"></script>
   </body>
 </html>

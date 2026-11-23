@@ -1,0 +1,14 @@
+resources:
+  pipelines:
+    fitness_etl:
+      name: fitness_etl
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      serverless: true
+      continuous: false
+      root_path: ../src/pipeline
+      configuration:
+        raw_landing_path: /Volumes/${var.catalog}/${var.schema}/raw/landing/
+      libraries:
+        - glob:
+            include: ../src/pipeline/transformations/**

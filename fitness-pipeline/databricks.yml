@@ -1,0 +1,19 @@
+bundle:
+  name: fitness_pipeline
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    default: workspace
+  schema:
+    default: fitness
+
+targets:
+  # Single personal target: no name prefixes, schedule active.
+  personal:
+    default: true
+    workspace:
+      profile: free
+      host: https://dbc-bfbd67ef-7571.cloud.databricks.com

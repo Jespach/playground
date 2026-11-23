@@ -1,0 +1,33 @@
+resources:
+  jobs:
+    fitness_daily:
+      name: fitness_daily
+      description: Pull Garmin Connect into the raw volume, then refresh fitness_etl.
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"   # 06:00 daily
+        timezone_id: Africa/Johannesburg
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: ingest
+          spark_python_task:
+            python_file: ../src/ingest/ingest_job.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${var.schema}
+          environment_key: ingest_env
+          max_retries: 1
+          min_retry_interval_millis: 600000
+        - task_key: refresh
+          depends_on:
+            - task_key: ingest
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.fitness_etl.id}
+      environments:
+        - environment_key: ingest_env
+          spec:
+            client: "4"
+            dependencies:
+              - garminconnect==0.3.20
+              - requests

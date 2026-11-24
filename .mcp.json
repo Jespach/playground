@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "fitness-workouts": {
+      "type": "stdio",
+      "command": "C:/Users/Jack/Documents/Coding Projects/Playground/fitness-pipeline/.venv/Scripts/python.exe",
+      "args": ["C:/Users/Jack/Documents/Coding Projects/Playground/fitness-pipeline/mcp/workout_server.py"],
+      "env": {
+        "FITNESS_DATABRICKS_PROFILE": "free",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}

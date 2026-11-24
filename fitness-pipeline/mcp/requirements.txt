@@ -1,0 +1,3 @@
+# Local-only deps for the workout MCP server (not used by the Databricks job).
+mcp>=2.3
+databricks-sdk

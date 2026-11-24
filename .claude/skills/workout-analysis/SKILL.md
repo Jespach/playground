@@ -11,8 +11,8 @@ Playground `.mcp.json`) reads `workspace.fitness` on Databricks. Its tools are r
 | Tool | Use |
 |---|---|
 | `find_workouts(date_from, date_to, sport, text, min_km, max_km, limit)` | Locate candidates. Returns `total_matches` and `has_streams` |
-| `get_workout(activity_id, points=160, max_hr=None)` | Full analysis plus `widget_data` for the chart template |
-| `compare_workouts(activity_ids)` | 2–5 sessions on a shared distance axis, plus km splits |
+| `get_workout(activity_id, points=110, max_hr=None)` | Full analysis plus a ready-made `widget_html` |
+| `compare_workouts(activity_ids)` | 2–5 sessions on a shared distance axis, plus km splits and `widget_html` |
 | `query_fitness(sql)` | Ad-hoc read-only SELECT for follow-ups (`{S}` = `workspace.fitness`) |
 
 If the tools are missing, tell the user the server needs approving or restarting (the
@@ -36,18 +36,26 @@ named sessions map to `text` ("intervals", "parkrun", "Workout").
 
 ## 2. Fetch and render
 
+Speed matters here: the widget should appear as soon as the data is back.
+
 1. `get_workout(id)`. Pass `max_hr` only if the user has told you theirs.
 2. If you haven't this conversation, call `mcp__visualize__read_me` (modules `chart`,
-   `interactive`) before your first widget. That's required by the widget tool.
-3. Read `workout.html` from this skill folder. Replace the token `__DATA__` with the
-   tool's `widget_data` object serialised as compact JSON, **unchanged**. Don't edit,
-   round or drop fields, and don't change the rest of the template. Call
-   `mcp__visualize__show_widget` with that HTML and a title like
-   `workout_2026_11_24_trail_run`.
-4. For comparisons, do the same with `compare.html` and the full `compare_workouts` result.
+   `interactive`). The widget tool requires it once. Make the call in the same message
+   as `get_workout` so they run in parallel.
+3. Call `mcp__visualize__show_widget` with `widget_code` = the tool's `widget_html`
+   **copied exactly, character for character**, and a title like
+   `workout_2026_11_24_trail_run`. Don't reformat, re-indent, round, trim or "fix"
+   anything in it, and don't add your own HTML around it. Write one short sentence
+   before the call (the widget tool asks for one), and nothing else before it.
+4. For comparisons, do the same with `compare_workouts`' `widget_html`.
 
-The template already handles missing data (no GPS, no HR, rides vs runs, no reps,
-no similar sessions). Never hand-build a replacement chart for these cases.
+How it works: `widget_html` is a tiny shell. The data sits inline (`window.WK` /
+`window.WKC`), and the chart code (`web/workout.js`, `web/compare.js` in this folder) loads
+from jsDelivr, pinned to a commit of the public repo by `WIDGET_BASE` in the server. The
+script handles missing data itself (no GPS, no HR, rides vs runs, no reps, no similar
+sessions), so never hand-build a replacement chart. If you change `web/*.js`: commit,
+push, then bump the commit hash in `WIDGET_BASE` (otherwise widgets keep using the old
+code).
 
 ## 3. Write the analysis (as text, after the widget)
 

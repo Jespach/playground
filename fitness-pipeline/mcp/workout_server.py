@@ -10,6 +10,7 @@ Env:  FITNESS_DATABRICKS_PROFILE (default "free"), FITNESS_WAREHOUSE_ID,
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -29,6 +30,13 @@ PROFILE = os.environ.get("FITNESS_DATABRICKS_PROFILE", "free")
 WAREHOUSE = os.environ.get("FITNESS_WAREHOUSE_ID", "a6fa70a1aff7a539")
 SCHEMA = os.environ.get("FITNESS_SCHEMA", "workspace.fitness")
 RO = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+# Chart code lives in .claude/skills/workout-analysis/web/ and is served by jsDelivr from the
+# public GitHub repo, pinned to a commit so a widget never changes under an old conversation.
+# After editing web/*.js: commit, push, and bump this ref (or set FITNESS_WIDGET_BASE).
+WIDGET_BASE = os.environ.get(
+    "FITNESS_WIDGET_BASE",
+    "https://cdn.jsdelivr.net/gh/Jespach/playground@18f065a10fbd6be7406a11db7e84bdce0d938480/.claude/skills/workout-analysis/web")
+CHARTJS = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"
 
 mcp = MCPServer(
     name="fitness-workouts",
@@ -327,16 +335,16 @@ def _hr_recovery(samples: list[dict], end_s: float) -> dict:
 
 
 @mcp.tool(annotations=RO)
-def get_workout(activity_id: int, points: int = 160, max_hr: int | None = None) -> dict:
+def get_workout(activity_id: int, points: int = 110, max_hr: int | None = None) -> dict:
     """Full analysis of one workout (run or ride with streams), ready to chart.
 
     Returns: summary; laps (with Garmin intensity and rep flag); analysis (workout type
     guess, rep-by-rep breakdown with pace fade, HR creep and 60 s HR recovery, HR zones,
     aerobic decoupling, best efforts); context (fitness/fatigue/form going in, HRV,
     resting HR and sleep that morning); similar (comparable past sessions with the same
-    rep structure or distance, for progress trends); chart (columnar streams downsampled
-    to `points` time bins: t=min, km, hr, pace=min/km, spd=km/h, ele=m, cad, pwr, tmp=°C,
-    lat, lon, lap). max_hr overrides the estimated max HR used for zones.
+    rep structure or distance, for progress trends); widget_html (a complete interactive
+    chart: pass it verbatim as widget_code to show_widget). max_hr overrides the estimated
+    max HR used for zones.
     """
     aid = int(activity_id)
     points = max(40, min(int(points), 400))
@@ -471,13 +479,55 @@ def get_workout(activity_id: int, points: int = 160, max_hr: int | None = None) 
     similar = _similar(aid, summary, interval, len(reps), rep_summary, reps)
     return {
         "summary": summary, "analysis": analysis, "context": ctx, "similar": similar, "laps": lap_out,
-        "widget_data": _widget_data(summary, analysis, ctx, similar, lap_out, interval, is_run,
-                                    _columnar(_downsample(samples, points))),
+        "widget_html": _widget_html("workout", "WK", f"Interactive analysis of {summary['name']} on {summary['date']}",
+                                    _widget_data(summary, analysis, ctx, similar, lap_out, interval, is_run,
+                                                 _slim_chart(_columnar(_downsample(samples, points)), is_run))),
     }
 
 
+def _compact(o):
+    """Shrink JSON: whole floats become ints."""
+    if isinstance(o, float):
+        return int(o) if o.is_integer() else o
+    if isinstance(o, dict):
+        return {k: _compact(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_compact(v) for v in o]
+    return o
+
+
+def _widget_html(kind: str, var: str, title: str, data: dict) -> str:
+    """Tiny shell: data inline, chart code loaded from the CDN (see WIDGET_BASE)."""
+    payload = json.dumps(_compact(data), separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
+    root = "wk" if kind == "workout" else "wkc"
+    safe = title.replace("<", "").replace(">", "").replace("&", "and")
+    return (f'<h2 class="sr-only">{safe}</h2><div id="{root}" style="min-height:400px"></div>'
+            f'<script>window.{var}={payload}</script>'
+            f'<script src="{CHARTJS}"></script><script src="{WIDGET_BASE}/{kind}.js"></script>')
+
+
+def _slim_chart(c: dict, is_run: bool) -> dict:
+    """Trim precision and redundant series; laps become run-length pairs."""
+    out = {}
+    for key, v in c.items():
+        if key == "spd" and is_run:
+            continue
+        if key == "lap":
+            lr = []
+            for lap in v:
+                if lr and lr[-1][0] == lap:
+                    lr[-1][1] += 1
+                else:
+                    lr.append([lap, 1])
+            out["lr"] = lr
+            continue
+        nd = {"t": 1, "km": 2, "pace": 2, "spd": 1, "lat": 4, "lon": 4}.get(key, 0)
+        out[key] = [None if x is None else round(x, nd) for x in v]
+    return out
+
+
 def _widget_data(summary, analysis, ctx, similar, laps, interval, is_run, chart) -> dict:
-    """Compact payload for the skill's workout.html template (paste verbatim as D)."""
+    """Compact payload for web/workout.js (window.WK)."""
     def spd(p):
         return r1(60 / p, 2) if p else None
     rep_pace = (analysis.get("rep_summary") or {}).get("avg_rep_pace")
@@ -564,9 +614,10 @@ def _similar(aid: int, summary: dict, interval: bool, n_reps: int, rep_summary, 
 
 
 @mcp.tool(annotations=RO)
-def compare_workouts(activity_ids: list[int], points: int = 120) -> dict:
-    """Overlay 2–5 workouts. Returns each one's summary plus streams binned by distance
-    (km, hr, pace, ele, cad) so they share an x-axis, and per-km splits."""
+def compare_workouts(activity_ids: list[int], points: int = 100) -> dict:
+    """Overlay 2–5 workouts. Returns each one's summary and per-km splits, plus
+    widget_html (pace, HR and elevation overlaid by distance, and split bars): pass it
+    verbatim as widget_code to show_widget."""
     ids = [int(i) for i in activity_ids][:5]
     if len(ids) < 2:
         return {"error": "Give at least two activity ids."}
@@ -601,9 +652,14 @@ def compare_workouts(activity_ids: list[int], points: int = 120) -> dict:
             "time": dur_str(s["moving_minutes"]), "pace": pace_str(s["pace_min_per_km"]), "avg_hr": r1(s["avg_hr"], 0),
             "load": r1(s["training_load"], 0), "elev_m": r1(s["elevation_gain_m"], 0),
             "km_splits_min": splits,
-            "stream": {k2: [r[k2] for r in d] for k2 in ("km", "hr", "pace", "ele", "cad")},
+            "stream": {k2: [None if r[k2] is None else round(r[k2], nd) for r in d]
+                       for k2, nd in (("km", 2), ("hr", 0), ("pace", 2), ("ele", 0))},
         })
-    return {"workouts": out}
+    html = _widget_html("compare", "WKC", "Comparison of " + ", ".join(f"{w['date']} {w['name']}" for w in out),
+                        {"workouts": out})
+    for w in out:
+        w.pop("stream")
+    return {"workouts": out, "widget_html": html}
 
 
 _WRITE = re.compile(r"\b(insert|update|delete|merge|drop|create|alter|truncate|grant|revoke|copy|"
